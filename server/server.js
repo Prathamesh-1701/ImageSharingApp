@@ -3,19 +3,47 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
+// Initialize express app
 const app = express();
-const upload = multer({ dest: 'uploads/' });
 
+// Set up multer for file uploads
+const upload = multer({ dest: 'temp/' });
+
+// Middleware
 app.use(express.json());
+app.use(express.static('uploads'));
 
-// Serve static files from uploads directory
-app.use('/uploads', express.static('uploads'));
+// Get list of albums
+app.get('/albums', (req, res) => {
+  const albumsPath = path.join(__dirname, 'uploads');
+  fs.readdir(albumsPath, (err, files) => {
+    if (err) {
+      return res.status(500).json({ error: 'Error reading albums' });
+    }
+    const directories = files.filter(file => fs.statSync(path.join(albumsPath, file)).isDirectory());
+    res.json(directories);
+  });
+});
 
-// Handle image uploads
+// Get images for a specific album
+app.get('/albums/:album/images', (req, res) => {
+  const album = req.params.album;
+  const albumPath = path.join(__dirname, 'uploads', album);
+
+  fs.readdir(albumPath, (err, files) => {
+    if (err) {
+      return res.status(500).json({ error: 'Error reading images' });
+    }
+    const imagePaths = files.map(file => `/uploads/${album}/${file}`);
+    res.json(imagePaths);
+  });
+});
+
+// Upload image
 app.post('/upload', upload.single('image'), (req, res) => {
   const { album } = req.body;
   const tempPath = req.file.path;
-  const albumPath = path.join('uploads', album || 'default');
+  const albumPath = path.join(__dirname, 'uploads', album || 'default');
 
   if (!fs.existsSync(albumPath)) {
     fs.mkdirSync(albumPath, { recursive: true });
@@ -24,45 +52,27 @@ app.post('/upload', upload.single('image'), (req, res) => {
   const targetPath = path.join(albumPath, path.basename(tempPath));
   fs.rename(tempPath, targetPath, (err) => {
     if (err) {
-      console.error('Error moving file:', err);
-      return res.status(500).send('Error moving file');
+      return res.status(500).json({ error: 'Error moving file' });
     }
     res.json({ filePath: `/uploads/${album || 'default'}/${path.basename(targetPath)}` });
   });
 });
 
-// Create a new album
+// Create new album
 app.post('/albums', (req, res) => {
-  // Albums are managed through the filesystem; this endpoint can be expanded
-  // or updated to include album metadata if needed
-  res.status(201).send('Album created');
+  const { albumName } = req.body;
+  const albumPath = path.join(__dirname, 'uploads', albumName);
+
+  if (!fs.existsSync(albumPath)) {
+    fs.mkdirSync(albumPath, { recursive: true });
+    res.sendStatus(201);
+  } else {
+    res.status(400).json({ error: 'Album already exists' });
+  }
 });
 
-// Get list of albums
-app.get('/albums', (req, res) => {
-  fs.readdir('uploads', (err, files) => {
-    if (err) {
-      return res.status(500).send('Unable to list albums');
-    }
-    res.json(files.filter(file => fs.statSync(path.join('uploads', file)).isDirectory()));
-  });
-});
-
-// Get images from an album
-app.get('/albums/:album/images', (req, res) => {
-  const album = req.params.album;
-  const albumPath = path.join('uploads', album);
-
-  fs.readdir(albumPath, (err, files) => {
-    if (err) {
-      return res.status(500).send('Unable to scan files!');
-    }
-    const filePaths = files.map(file => `/uploads/${album}/${file}`);
-    res.json(filePaths);
-  });
-});
-
-const PORT = 5001;
+// Start the server
+const PORT = process.env.PORT || 5001;
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`Server is running on port ${PORT}`);
 });
